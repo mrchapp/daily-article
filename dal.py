@@ -40,7 +40,14 @@ if DEBUG_MODE:
     print(month, day, year)
 
 # Empty list
-final_sections = []
+final_sections = ["""\
+NOTE: The bot that posts to this mailing list daily needs a new maintainer.
+Without a new maintainer, the bot will stop posting to this mailing list
+daily around September 30, 2026.
+https://meta.wikimedia.org/wiki/Talk:daily-article-l
+"""
+]
+#final_sections = []
 
 def strip_html(original_text):
     soup = BeautifulSoup.BeautifulSoup(original_text, fromEncoding='utf-8')
@@ -87,7 +94,7 @@ def make_featured_article_section(month, day, year):
     except wikitools.page.NoPage:
         return False
     parsed_wikitext = parse_wikitext(enwiki, wikitext)
-    wrapper_div = u'<div class="mw-parser-output">'
+    wrapper_div = u'<div class="mw-content-ltr mw-parser-output" lang="en" dir="ltr">'
     if parsed_wikitext.startswith(wrapper_div):
         parsed_wikitext = parsed_wikitext.replace(wrapper_div, '')
     # Grab the first <p> tag and pray
@@ -201,7 +208,7 @@ def make_wikiquote_section(month, day, year):
     parsed_wikitext = parse_wikitext(enquote, '{{'+page_title+'}}')
     lines = []
     for line in parsed_wikitext.split('\n'):
-        if line.find('~') != -1:
+        if line.find(u'\u2014') != -1:
             author_soup = BeautifulSoup.BeautifulSoup(line)
             for a in author_soup.findAll('a'):
                 if not a.string:
@@ -214,6 +221,7 @@ def make_wikiquote_section(month, day, year):
     authorless_lines = '\n'.join(lines)
     quote = strip_html(authorless_lines)
     quote = quote.strip()
+    quote = quote.replace('\xe2\x80\x9c\n\n', '').replace('\n\n\xe2\x80\x9d', '')
     header = '___________________________\n'
     header += 'Wikiquote quote of the day:\n'
     wikiquote_section = '\n'.join([header,
