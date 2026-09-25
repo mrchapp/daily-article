@@ -40,14 +40,7 @@ if DEBUG_MODE:
     print(month, day, year)
 
 # Empty list
-final_sections = ["""\
-NOTE: The bot that posts to this mailing list daily needs a new maintainer.
-Without a new maintainer, the bot will stop posting to this mailing list
-daily around September 30, 2026.
-https://meta.wikimedia.org/wiki/Talk:daily-article-l
-"""
-]
-#final_sections = []
+final_sections = []
 
 def strip_html(original_text):
     soup = BeautifulSoup.BeautifulSoup(original_text, fromEncoding='utf-8')
