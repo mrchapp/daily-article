@@ -34,6 +34,8 @@ parser.add_argument('--debug', action='store_true',
                     help='print the sections, and any traceback, instead of sending or posting')
 parser.add_argument('--date', type=parse_date, default=datetime.date.today(), metavar='YYYY-MM-DD',
                     help='the date to build the email for (default: today, local time)')
+parser.add_argument('--output', metavar='FILE.EML',
+                    help='write the email to FILE.EML instead of sending it')
 args = parser.parse_args()
 
 DEBUG_MODE = args.debug
@@ -393,21 +395,24 @@ def wrap_text(text):
     wrapped_lines = textwrap.wrap(text, width=72)
     return '\n'.join(wrapped_lines)
 
-def send_email(email_to, email_from, email_subject, email_body):
+def build_email(email_to, email_from, email_subject, email_body):
     msg = MIMENonMultipart('text', 'plain')
     msg['Content-Transfer-Encoding'] = '8bit'
     msg.set_payload(email_body, 'utf-8')
     msg['From'] = email_from
     msg['Subject'] = Header(email_subject, 'utf-8')
+    msg['To'] = email_to
+    return msg
+
+def send_email(email_to, email_from, email_subject, email_body):
     server = smtplib.SMTP(config.smtp_host, config.smtp_port)
     server.ehlo()
     server.starttls()
     server.ehlo()
     server.login(email_from, config.email_password)
     for addr in email_to:
-        msg['To'] = addr
-        body = msg.as_bytes()
-        server.sendmail(email_from, addr, body, '8bitmime')
+        msg = build_email(addr, email_from, email_subject, email_body)
+        server.sendmail(email_from, addr, msg.as_bytes(), '8bitmime')
     server.quit()
 
 send = False
@@ -442,7 +447,12 @@ except:  # Unnamed!
                       section='new',
                       bot=1)
 
-if DEBUG_MODE:
+if args.output:
+    # The artifact is addressed to the sender: it is not being mailed anywhere.
+    with open(args.output, 'wb') as handle:
+        handle.write(build_email(config.from_address, config.from_address,
+                                 subject, final_output).as_bytes())
+elif DEBUG_MODE:
     print(subject + '\n')
     print('\n'.join(final_sections))
 elif send:
