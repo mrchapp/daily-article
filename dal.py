@@ -36,6 +36,9 @@ parser.add_argument('--date', type=parse_date, default=datetime.date.today(), me
                     help='the date to build the email for (default: today, local time)')
 parser.add_argument('--output', metavar='FILE.EML',
                     help='write the email to FILE.EML instead of sending it')
+parser.add_argument('--force', action='store_true',
+                    help='warn on stderr and carry on when the word-of-the-day definitions cannot '
+                         'be found, instead of failing')
 args = parser.parse_args()
 
 DEBUG_MODE = args.debug
@@ -315,8 +318,9 @@ def format_definition(text, sub_definitions):
 
 def make_wiktionary_section(month, day, year):
     page_title = 'Wiktionary:Word of the day/%s/%s %s' % (year, month, day)
+    page_url = enwikt_base + '/wiki/' + page_title.replace(' ', '_')
     if DEBUG_MODE:
-        print(enwikt_base + '/wiki/' + page_title.replace(' ', '_'))
+        print(page_url)
     parsed_wikitext = parse_wikitext(enwikt, '{{'+page_title+'}}')
     soup = BeautifulSoup(parsed_wikitext, 'html.parser')
     word = soup.find('span', id='WOTD-rss-title').string
@@ -348,6 +352,11 @@ def make_wiktionary_section(month, day, year):
         text, sub_definitions = definitions_stripped[0]
         definitions = [format_definition(text, sub_definitions)]
     if not definitions:
+        message = 'no definitions found on %s' % page_url
+        if args.force:
+            print(message, file=sys.stderr)
+        else:
+            raise ValueError(message)
         return
 
     header = '_____________________________\n'
