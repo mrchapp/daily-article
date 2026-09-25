@@ -180,25 +180,47 @@ def make_featured_article_section(month, day, year):
         if line.startswith('<p>') and not found:
             first_para = line
             found = True
-    p_text = first_para.rsplit('. (', 1)[0]+'.'
+    # The paragraph trails off into a "(Full article...)" parenthetical and the
+    # prose is everything before it. Find that element by identity instead of
+    # probing the raw HTML for '. (' and friends: the parser wraps the
+    # parenthetical in <i>(<b><a ...>Full&#160;article...</a></b>)</i>, so those
+    # literal probes never match and the fragment leaked into the emailed text.
+    para_soup = BeautifulSoup(first_para, 'html.parser')
+    read_more_link = None
+    for a in para_soup.find_all('a'):
+        if a.get_text().replace('\xa0', ' ').strip().startswith('Full article'):
+            read_more_link = a
+    if read_more_link is not None:
+        read_more_href = read_more_link['href']
+        featured_article_title = read_more_link['title']
+        # Take the parentheses with it when they wrap the link (always <i> so
+        # far), and keep the prose's own full stop: it used to be consumed by
+        # the split at '. (' and re-appended by hand.
+        parenthetical = read_more_link.find_parent('i') or read_more_link
+        parenthetical.extract()
+        p_text = para_soup.decode_contents()
+    else:
+        # Unrecognised markup: keep the old behaviour rather than guessing.
+        p_text = first_para.rsplit('. (', 1)[0]+'.'
+        if (first_para.find('. (') != -1 and
+            first_para[:100].find('._(') != -1):
+            more_html = first_para.rsplit('. (', 2)
+            more_html = '. ('.join([more_html[1], more_html[2]])
+        elif first_para.find('. (') != -1:
+            more_html = first_para.rsplit('. (', 1)[1]
+        elif first_para.find('." (') != -1:
+            more_html = first_para.rsplit('." (', 1)[1]
+        else:
+            more_html = first_para
+        more_soup = BeautifulSoup(more_html, 'html.parser')
+        for a in more_soup.find_all('a'):
+            read_more_href = a['href']
+            featured_article_title = a['title']
     p_text = unescape(p_text)
     clean_p_text = strip_html(p_text)
-    if (first_para.find('. (') != -1 and
-        first_para[:100].find('._(') != -1):
-        more_html = first_para.rsplit('. (', 2)
-        more_html = '. ('.join([more_html[1], more_html[2]])
-    elif first_para.find('. (') != -1:
-        more_html = first_para.rsplit('. (', 1)[1]
-    elif first_para.find('." (') != -1:
-        more_html = first_para.rsplit('." (', 1)[1]
-    else:
-        more_html = first_para
-    more_soup = BeautifulSoup(more_html, 'html.parser')
-    for a in more_soup.find_all('a'):
-        read_more = ('%s' + '<%s%s>') % ('Read more: ',
-                                         enwiki_base,
-                                         a['href'].replace('(', '%28').replace(')', '%29'))
-        featured_article_title = a['title']
+    read_more = ('%s' + '<%s%s>') % ('Read more: ',
+                                     enwiki_base,
+                                     read_more_href.replace('(', '%28').replace(')', '%29'))
     featured_article_section = '\n'.join([wrap_text(clean_p_text),
                                           '',
                                           read_more,
