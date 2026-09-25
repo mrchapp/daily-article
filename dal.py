@@ -282,18 +282,20 @@ def make_selected_anniversaries_section(month, day):
             plaintext_lines = wrap_text(strip_html(unescape(line)))
             formatted_plaintext_lines = ':\n\n'.join(plaintext_lines.split(' \u2013 ', 1))
             line_soup = BeautifulSoup(line, 'html.parser')
-            for b in line_soup.find_all('b'):
-                if (len(b.contents) == 3 and
-                    (b.contents[0] == b.contents[2] == '"')):
-                    b.contents.pop()
-                    b.contents.pop(0)
-                if (len(b.contents) == 2 and
-                    b.contents[1] == "'"):
-                    b.contents.pop()
-                for a in b.contents:
-                    read_more = ('<%s%s>') % (enwiki_base,
-                                              a['href'].replace('(', '%28').replace(')', '%29'))
-            complete_item = formatted_plaintext_lines+'\n'+read_more+'\n'
+            subject = line_soup.find('b')
+            anchor = subject.find('a', href=True) if subject is not None else None
+            if anchor is None:
+                snippet = ' '.join(formatted_plaintext_lines.replace(':\n\n', ': ').split())[:60]
+                message = 'no link found for an anniversary item on %s: %r' % (page_title, snippet)
+                if args.force:
+                    print(message, file=sys.stderr)
+                else:
+                    raise ValueError(message)
+                complete_item = formatted_plaintext_lines+'\n'
+            else:
+                read_more = ('<%s%s>') % (enwiki_base,
+                                          anchor['href'].replace('(', '%28').replace(')', '%29'))
+                complete_item = formatted_plaintext_lines+'\n'+read_more+'\n'
             anniversaries.append(complete_item)
     header = '_______________________________\n'
     header += 'Today\'s selected anniversaries:\n'
