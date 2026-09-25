@@ -2,6 +2,7 @@
 # Public domain; Mr.Z-man, MZMcBride; 2012
 # Taken over 2026 by mrchapp, Daniel Díaz
 
+import argparse
 import datetime
 from email.header import Header
 from email.mime.nonmultipart import MIMENonMultipart
@@ -20,9 +21,13 @@ from bs4 import BeautifulSoup
 
 import config
 
-DEBUG_MODE = False
-if sys.argv[-1] == '--debug':
-    DEBUG_MODE = True
+parser = argparse.ArgumentParser(
+    description='Build the daily Wikipedia, Wiktionary and Wikiquote email.')
+parser.add_argument('--debug', action='store_true',
+                    help='print the sections, and any traceback, instead of sending or posting')
+args = parser.parse_args()
+
+DEBUG_MODE = args.debug
 
 # The Wikimedia API requires a descriptive User-Agent.
 USER_AGENT = 'daily-article bot (https://meta.wikimedia.org/wiki/Talk:daily-article-l)'
