@@ -283,6 +283,20 @@ def make_selected_anniversaries_section(month, day):
     final_sections.append(selected_anniversaries_section)
     return
 
+def definition_text(element):
+    """The text of a definition element, without any sub-list hanging off it."""
+    element_soup = BeautifulSoup(element.decode_contents(), 'html.parser')
+    for ol in element_soup.find_all('ol'):
+        ol.decompose()
+    return unescape(strip_html(element_soup.decode_contents())).strip()
+
+def format_definition(text, sub_definitions):
+    """One definition, with the sub-senses that hang off it indented below it."""
+    lines = wrap_text(text).split('\n')
+    for sub in sub_definitions:
+        lines += ['    ' + line for line in wrap_text(sub).split('\n')]
+    return '\n'.join(lines)
+
 def make_wiktionary_section(month, day, year):
     page_title = 'Wiktionary:Word of the day/%s/%s %s' % (year, month, day)
     if DEBUG_MODE:
@@ -291,26 +305,34 @@ def make_wiktionary_section(month, day, year):
     soup = BeautifulSoup(parsed_wikitext, 'html.parser')
     word = soup.find('span', id='WOTD-rss-title').string
 
+    # The definitions hang off one container; every other list on the page is
+    # navigation chrome ("About Word of the Day" and friends) that a flat walk
+    # over <li> used to sweep up and number as if it were a sense. They sit in
+    # one <ol> per part of speech, and a sub-sense is an <li> inside a
+    # definition's own <li>, so the top-level ones are those with no <li> above
+    # them.
+    container = soup.find('div', id='WOTD-rss-description')
+    if container is not None:
+        definition_items = [li for li in container.find_all('li')
+                            if li.find_parent('li') is None]
+    else:
+        # Unrecognised markup: keep the old flat walk rather than print nothing.
+        definition_items = soup.find_all('li')
     definitions_stripped = []
-    for li in soup.find_all('li'):
-        li_contents = li.decode_contents()
-        nested_soup = BeautifulSoup(li_contents, 'html.parser')
-        # Remove nested li elements, by removing any nested ol elements,
-        # since the li elements will be processed later separately
-        for ol in nested_soup.find_all('ol'):
-            ol.decompose()
-        li_contents = nested_soup.decode_contents()
-        def_ = unescape(strip_html(li_contents)).strip()
-        definitions_stripped.append(def_)
+    for li in definition_items:
+        # Sub-senses belong to the definition they hang from: carry them along
+        # rather than decomposing their list and promoting each one to a sense.
+        definitions_stripped.append((definition_text(li),
+                                     [definition_text(sub) for sub in li.find_all('li')]))
     definitions = []
     if len(definitions_stripped) > 1:
-        for i, t in enumerate(definitions_stripped):
-            definitions.append(str(i + 1) + '. ' + t)
+        for i, (text, sub_definitions) in enumerate(definitions_stripped):
+            definitions.append(format_definition(str(i + 1) + '. ' + text, sub_definitions))
     elif len(definitions_stripped) == 1:
-        definitions = definitions_stripped
+        text, sub_definitions = definitions_stripped[0]
+        definitions = [format_definition(text, sub_definitions)]
     if not definitions:
         return
-    definitions = list(map(wrap_text, definitions))
 
     header = '_____________________________\n'
     header += 'Wiktionary\'s word of the day:\n'
