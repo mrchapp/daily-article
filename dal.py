@@ -1,19 +1,22 @@
-#! /usr/bin/env python
+#!/usr/bin/env python3
 # Public domain; Mr.Z-man, MZMcBride; 2012
+# Taken over 2026 by mrchapp, Daniel Díaz
 
 import datetime
-from email.MIMENonMultipart import MIMENonMultipart
 from email.header import Header
-import htmlentitydefs
-import urllib
+from email.mime.nonmultipart import MIMENonMultipart
+import html.entities
+import http.cookiejar
+import json
 import re
 import smtplib
 import sys
 import textwrap
 import traceback
+import urllib.parse
+import urllib.request
 
-import BeautifulSoup
-import wikitools
+from bs4 import BeautifulSoup
 
 import config
 
@@ -21,15 +24,97 @@ DEBUG_MODE = False
 if sys.argv[-1] == '--debug':
     DEBUG_MODE = True
 
+# The Wikimedia API requires a descriptive User-Agent.
+USER_AGENT = 'daily-article bot (https://meta.wikimedia.org/wiki/Talk:daily-article-l)'
+
 # Establish a few wikis
 metawiki_base = 'https://meta.wikimedia.org'
-metawiki = wikitools.Wiki(metawiki_base+'/w/api.php'); metawiki.setMaxlag(-1)
 enwiki_base = 'https://en.wikipedia.org'
-enwiki = wikitools.Wiki(enwiki_base+'/w/api.php'); enwiki.setMaxlag(-1)
 enwikt_base = 'https://en.wiktionary.org'
-enwikt = wikitools.Wiki(enwikt_base+'/w/api.php'); enwikt.setMaxlag(-1)
 enquote_base = 'https://en.wikiquote.org'
-enquote = wikitools.Wiki(enquote_base+'/w/api.php'); enquote.setMaxlag(-1)
+
+
+class APIError(Exception):
+    pass
+
+
+class NoPage(Exception):
+    pass
+
+
+class Wiki(object):
+    """Minimal replacement for the wikitools.Wiki class.
+
+    Only the calls this bot makes are implemented. No maxlag parameter is
+    sent: the old code called setMaxlag(-1), which disabled it.
+    """
+
+    def __init__(self, baseurl):
+        self.baseurl = baseurl
+        self.api_path = baseurl + '/w/api.php'
+        # A cookie jar keeps the session that login() establishes.
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+    def api_request(self, params):
+        params = dict(params)
+        # wikitools always forced the JSON format (api.APIRequest.__init__);
+        # without it the API answers with HTML-wrapped JSON.
+        params['format'] = 'json'
+        data = urllib.parse.urlencode(params).encode('utf-8')
+        request = urllib.request.Request(
+            self.api_path, data=data, headers={'User-Agent': USER_AGENT})
+        with self.opener.open(request) as response:
+            result = json.load(response)
+        if 'error' in result:
+            error = result['error']
+            raise APIError('%s: %s' % (error.get('code'), error.get('info')))
+        return result
+
+    def get_wikitext(self, title):
+        result = self.api_request({'action': 'query',
+                                   'prop': 'revisions',
+                                   'rvprop': 'content',
+                                   'rvslots': 'main',
+                                   'titles': title,
+                                   # wikitools.Page() defaulted to followRedir=True.
+                                   'redirects': ''})
+        page = list(result['query']['pages'].values())[0]
+        if 'missing' in page:
+            raise NoPage(title)
+        revision = page['revisions'][0]
+        if 'slots' in revision:
+            return revision['slots']['main']['*']
+        return revision['*']
+
+    def token(self, type_):
+        result = self.api_request({'action': 'query',
+                                   'meta': 'tokens',
+                                   'type': type_})
+        return result['query']['tokens'][type_ + 'token']
+
+    def login(self, username, password):
+        result = self.api_request({'action': 'login',
+                                   'lgname': username,
+                                   'lgpassword': password,
+                                   'lgtoken': self.token('login')})
+        if result['login'].get('result') != 'Success':
+            raise APIError('login failed: %s' % result['login'].get('reason'))
+
+    def edit(self, title, text, summary, section, bot):
+        self.api_request({'action': 'edit',
+                          'title': title,
+                          'text': text,
+                          'summary': summary,
+                          'section': section,
+                          'bot': bot,
+                          'token': self.token('csrf')})
+
+
+metawiki = Wiki(metawiki_base)
+enwiki = Wiki(enwiki_base)
+enwikt = Wiki(enwikt_base)
+enquote = Wiki(enquote_base)
 
 # Figure out the date
 date = datetime.datetime.utcnow()
@@ -43,17 +128,16 @@ if DEBUG_MODE:
 final_sections = []
 
 def strip_html(original_text):
-    soup = BeautifulSoup.BeautifulSoup(original_text, fromEncoding='utf-8')
-    new_text = ''.join(soup.findAll(text=True)).encode('utf-8')
+    soup = BeautifulSoup(original_text, 'html.parser')
+    new_text = ''.join(soup.find_all(string=True))
     return new_text
 
 def parse_wikitext(wiki, wikitext):
     params = {'action' : 'parse',
               'text'   : wikitext,
               'disablepp' : 'true'}
-    req = wikitools.api.APIRequest(wiki, params)
-    response = req.query()
-    parsed_wikitext = response[u'parse'][u'text'][u'*']
+    response = wiki.api_request(params)
+    parsed_wikitext = response['parse']['text']['*']
     return parsed_wikitext
 
 def unescape(text):
@@ -63,19 +147,19 @@ def unescape(text):
             # character reference
             try:
                 if text[:3] == '&#x':
-                    return unichr(int(text[3:-1], 16))
+                    return chr(int(text[3:-1], 16))
                 else:
-                    return unichr(int(text[2:-1]))
+                    return chr(int(text[2:-1]))
             except ValueError:
                 pass
         else:
             # named entity
             try:
-                text = unichr(htmlentitydefs.name2codepoint[text[1:-1]])
+                text = chr(html.entities.name2codepoint[text[1:-1]])
             except KeyError:
                 pass
         return text # leave as is
-    return re.sub('&#?\w+;', fixup, text)
+    return re.sub(r'&#?\w+;', fixup, text)
 
 def make_featured_article_section(month, day, year):
     page_title = '%s/%s %s, %s' % ("Wikipedia:Today's featured article",
@@ -83,11 +167,11 @@ def make_featured_article_section(month, day, year):
                                    day,
                                    year)
     try:
-        wikitext = wikitools.Page(enwiki, page_title).getWikiText()
-    except wikitools.page.NoPage:
+        wikitext = enwiki.get_wikitext(page_title)
+    except NoPage:
         return False
     parsed_wikitext = parse_wikitext(enwiki, wikitext)
-    wrapper_div = u'<div class="mw-content-ltr mw-parser-output" lang="en" dir="ltr">'
+    wrapper_div = '<div class="mw-content-ltr mw-parser-output" lang="en" dir="ltr">'
     if parsed_wikitext.startswith(wrapper_div):
         parsed_wikitext = parsed_wikitext.replace(wrapper_div, '')
     # Grab the first <p> tag and pray
@@ -99,22 +183,22 @@ def make_featured_article_section(month, day, year):
     p_text = first_para.rsplit('. (', 1)[0]+'.'
     p_text = unescape(p_text)
     clean_p_text = strip_html(p_text)
-    if (first_para.find('. (') is not -1 and
-        first_para[:100].find('._(') is not -1):
+    if (first_para.find('. (') != -1 and
+        first_para[:100].find('._(') != -1):
         more_html = first_para.rsplit('. (', 2)
         more_html = '. ('.join([more_html[1], more_html[2]])
-    elif first_para.find('. (') is not -1:
+    elif first_para.find('. (') != -1:
         more_html = first_para.rsplit('. (', 1)[1]
-    elif first_para.find('." (') is not -1:
+    elif first_para.find('." (') != -1:
         more_html = first_para.rsplit('." (', 1)[1]
     else:
         more_html = first_para
-    more_soup = BeautifulSoup.BeautifulSoup(more_html)
-    for a in more_soup.findAll('a'):
+    more_soup = BeautifulSoup(more_html, 'html.parser')
+    for a in more_soup.find_all('a'):
         read_more = ('%s' + '<%s%s>') % ('Read more: ',
                                          enwiki_base,
-                                         a['href'].encode('utf-8').replace('(', '%28').replace(')', '%29'))
-        featured_article_title = a['title'].encode('utf-8')
+                                         a['href'].replace('(', '%28').replace(')', '%29'))
+        featured_article_title = a['title']
     featured_article_section = '\n'.join([wrap_text(clean_p_text),
                                           '',
                                           read_more,
@@ -127,24 +211,24 @@ def make_selected_anniversaries_section(month, day):
     parsed_wikitext = parse_wikitext(enwiki, '{{'+page_title+'}}')
     anniversaries = []
     for line in parsed_wikitext.split('\n'):
-        if line.startswith('<li') and line.find(u'\u2013') != -1:
+        if line.startswith('<li') and line.find('\u2013') != -1:
             line = line.replace(' <i>(pictured)</i> ', ' ')
             line = line.replace(' <i>(pictured)</i>, ', ', ')
             line = re.sub(r'<span class="nowrap">(.+?)</span>', r'\1', line)
             plaintext_lines = wrap_text(strip_html(unescape(line)))
-            formatted_plaintext_lines = ':\n\n'.join(plaintext_lines.split(' \xe2\x80\x93 ', 1))
-            line_soup = BeautifulSoup.BeautifulSoup(line)
-            for b in line_soup.findAll('b'):
+            formatted_plaintext_lines = ':\n\n'.join(plaintext_lines.split(' \u2013 ', 1))
+            line_soup = BeautifulSoup(line, 'html.parser')
+            for b in line_soup.find_all('b'):
                 if (len(b.contents) == 3 and
-                    (b.contents[0] == b.contents[2] == u'"')):
+                    (b.contents[0] == b.contents[2] == '"')):
                     b.contents.pop()
                     b.contents.pop(0)
                 if (len(b.contents) == 2 and
-                    b.contents[1] == u"'"):
+                    b.contents[1] == "'"):
                     b.contents.pop()
                 for a in b.contents:
                     read_more = ('<%s%s>') % (enwiki_base,
-                                              a['href'].encode('utf-8').replace('(', '%28').replace(')', '%29'))
+                                              a['href'].replace('(', '%28').replace(')', '%29'))
             complete_item = formatted_plaintext_lines+'\n'+read_more+'\n'
             anniversaries.append(complete_item)
     header = '_______________________________\n'
@@ -159,19 +243,19 @@ def make_wiktionary_section(month, day, year):
     if DEBUG_MODE:
         print(enwikt_base + '/wiki/' + page_title.replace(' ', '_'))
     parsed_wikitext = parse_wikitext(enwikt, '{{'+page_title+'}}')
-    soup = BeautifulSoup.BeautifulSoup(parsed_wikitext, fromEncoding='utf-8')
-    word = soup.find('span', id='WOTD-rss-title').string.encode('utf-8')
+    soup = BeautifulSoup(parsed_wikitext, 'html.parser')
+    word = soup.find('span', id='WOTD-rss-title').string
 
     definitions_stripped = []
-    for li in soup.findAll('li'):
-        li_contents = li.renderContents()
-        nested_soup = BeautifulSoup.BeautifulSoup(li_contents, fromEncoding='utf-8')
+    for li in soup.find_all('li'):
+        li_contents = li.decode_contents()
+        nested_soup = BeautifulSoup(li_contents, 'html.parser')
         # Remove nested li elements, by removing any nested ol elements,
         # since the li elements will be processed later separately
-        for ol in nested_soup.findAll('ol'):
+        for ol in nested_soup.find_all('ol'):
             ol.decompose()
-        li_contents = nested_soup.renderContents()
-        def_ = unescape(strip_html(li_contents).decode('utf-8')).strip()
+        li_contents = nested_soup.decode_contents()
+        def_ = unescape(strip_html(li_contents)).strip()
         definitions_stripped.append(def_)
     definitions = []
     if len(definitions_stripped) > 1:
@@ -181,11 +265,11 @@ def make_wiktionary_section(month, day, year):
         definitions = definitions_stripped
     if not definitions:
         return
-    definitions = map(wrap_text, definitions)
+    definitions = list(map(wrap_text, definitions))
 
     header = '_____________________________\n'
     header += 'Wiktionary\'s word of the day:\n'
-    read_more = '<'+enwikt_base+'/wiki/'+urllib.quote(word.replace(' ', '_'))+'>'
+    read_more = '<'+enwikt_base+'/wiki/'+urllib.parse.quote(word.replace(' ', '_'))+'>'
     wiktionary_section = '\n'.join([header,
                                     word+':',
                                     '\n'.join(definitions),
@@ -193,7 +277,7 @@ def make_wiktionary_section(month, day, year):
                                     ''])
     if DEBUG_MODE:
         print(repr(wiktionary_section))
-    final_sections.append(wiktionary_section.encode('utf-8'))
+    final_sections.append(wiktionary_section)
     return
 
 def make_wikiquote_section(month, day, year):
@@ -201,20 +285,20 @@ def make_wikiquote_section(month, day, year):
     parsed_wikitext = parse_wikitext(enquote, '{{'+page_title+'}}')
     lines = []
     for line in parsed_wikitext.split('\n'):
-        if line.find(u'\u2014') != -1:
-            author_soup = BeautifulSoup.BeautifulSoup(line)
-            for a in author_soup.findAll('a'):
+        if line.find('\u2014') != -1:
+            author_soup = BeautifulSoup(line, 'html.parser')
+            for a in author_soup.find_all('a'):
                 if not a.string:
                     continue
                 read_more = ('<%s%s>') % (enquote_base,
-                                          a['href'].encode('utf-8').replace('(', '%28').replace(')', '%29'))
-                author = '  --'+a.string.encode('utf-8')
-        elif line != u'in<br />':
+                                          a['href'].replace('(', '%28').replace(')', '%29'))
+                author = '  --'+a.string
+        elif line != 'in<br />':
             lines.append(unescape(line))
     authorless_lines = '\n'.join(lines)
     quote = strip_html(authorless_lines)
     quote = quote.strip()
-    quote = quote.replace('\xe2\x80\x9c\n\n', '').replace('\n\n\xe2\x80\x9d', '')
+    quote = quote.replace('\u201c\n\n', '').replace('\n\n\u201d', '')
     header = '___________________________\n'
     header += 'Wikiquote quote of the day:\n'
     wikiquote_section = '\n'.join([header,
@@ -241,7 +325,7 @@ def send_email(email_to, email_from, email_subject, email_body):
     server.login(email_from, config.email_password)
     for addr in email_to:
         msg['To'] = addr
-        body = msg.as_string()
+        body = msg.as_bytes()
         server.sendmail(email_from, addr, body, '8bitmime')
     server.quit()
 
@@ -265,17 +349,17 @@ except:  # Unnamed!
         print(tb)
         sys.exit(1)
     else:
-        talk_page = wikitools.Page(metawiki, config.notification_page)
-        metawiki.login(config.wiki_username, config.wiki_password)
         text = '\n'.join(("Just thought you'd like to know:",
                           "<pre>",
                           tb,
                           "</pre>",
                           "Love, --~~~~"))
-        talk_page.edit(text=text,
-                       summary='daily-article-l delivery failed (%s)' % date,
-                       section='new',
-                       bot=1)
+        metawiki.login(config.wiki_username, config.wiki_password)
+        metawiki.edit(config.notification_page,
+                      text=text,
+                      summary='daily-article-l delivery failed (%s)' % date,
+                      section='new',
+                      bot=1)
 
 if DEBUG_MODE:
     print(subject + '\n')

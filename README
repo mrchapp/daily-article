@@ -2,12 +2,16 @@ Daily article mailing list bot for daily-article-l@lists.wikimedia.org:
 <https://lists.wikimedia.org/mailman/listinfo/daily-article-l>.
 
 Dependencies:
-* Python
-** BeautifulSoup module (<http://www.crummy.com/software/BeautifulSoup/>)
-** wikitools module (<https://code.google.com/p/python-wikitools/>)
+* Python 3
+** BeautifulSoup 4 module, imported as "bs4"
+   (<https://www.crummy.com/software/BeautifulSoup/bs4/doc/>)
+
+The MediaWiki API is queried with the standard library's "urllib.request"
+module, so no wiki client library is needed.
 
 Fill out "config.py.sample" appropriately and move the file to "config.py" in
-the same directory as "dal.py". Be sure to restrict read permissions on both
-"config.py" and the resulting "config.pyc" file.
+the same directory as "dal.py". Be sure to restrict read permissions on
+"config.py" and on the "__pycache__" directory, which caches a compiled copy of
+it.
 
 License information is available in the LICENSE file.
