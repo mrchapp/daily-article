@@ -21,10 +21,19 @@ from bs4 import BeautifulSoup
 
 import config
 
+def parse_date(text):
+    """Turn a YYYY-MM-DD command-line value into a date."""
+    try:
+        return datetime.date.fromisoformat(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError('expected a date like 2026-09-25, got %r' % text)
+
 parser = argparse.ArgumentParser(
     description='Build the daily Wikipedia, Wiktionary and Wikiquote email.')
 parser.add_argument('--debug', action='store_true',
                     help='print the sections, and any traceback, instead of sending or posting')
+parser.add_argument('--date', type=parse_date, default=datetime.date.today(), metavar='YYYY-MM-DD',
+                    help='the date to build the email for (default: today, local time)')
 args = parser.parse_args()
 
 DEBUG_MODE = args.debug
@@ -122,7 +131,7 @@ enwikt = Wiki(enwikt_base)
 enquote = Wiki(enquote_base)
 
 # Figure out the date
-date = datetime.datetime.utcnow()
+date = args.date
 year = date.year
 day = date.day
 month = date.strftime('%B')
