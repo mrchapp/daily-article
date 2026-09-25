@@ -228,14 +228,37 @@ def make_featured_article_section(month, day, year):
     final_sections.append(featured_article_section)
     return featured_article_title
 
+def drop_pictured_marker(line):
+    """Drop the "(pictured)" marker, and the space that held it apart.
+
+    Hiding the marker behind string replacements only worked while it was
+    followed by a space or by ", ": the parser also emits
+    "... <i>(pictured)</i>." and there the marker leaked into the emailed text.
+    """
+    line_soup = BeautifulSoup(line, 'html.parser')
+    marker = None
+    for italic in line_soup.find_all('i'):
+        if italic.get_text().replace('\xa0', ' ').strip() == '(pictured)':
+            marker = italic
+    if marker is None:
+        # Unrecognised markup: keep the replacements this used to make.
+        line = line.replace(' <i>(pictured)</i> ', ' ')
+        return line.replace(' <i>(pictured)</i>, ', ', ')
+    # The space before the marker goes with it, so that removing it cannot
+    # leave "... Furness ." behind.
+    previous = marker.previous_sibling
+    if previous is not None and isinstance(previous, str):
+        previous.replace_with(previous.rstrip())
+    marker.extract()
+    return line_soup.decode_contents()
+
 def make_selected_anniversaries_section(month, day):
     page_title = 'Wikipedia:Selected anniversaries/%s %s' % (month, day)
     parsed_wikitext = parse_wikitext(enwiki, '{{'+page_title+'}}')
     anniversaries = []
     for line in parsed_wikitext.split('\n'):
         if line.startswith('<li') and line.find('\u2013') != -1:
-            line = line.replace(' <i>(pictured)</i> ', ' ')
-            line = line.replace(' <i>(pictured)</i>, ', ', ')
+            line = drop_pictured_marker(line)
             line = re.sub(r'<span class="nowrap">(.+?)</span>', r'\1', line)
             plaintext_lines = wrap_text(strip_html(unescape(line)))
             formatted_plaintext_lines = ':\n\n'.join(plaintext_lines.split(' \u2013 ', 1))
