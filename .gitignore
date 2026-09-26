@@ -2,3 +2,4 @@ venv/
 config.py
 config.pyc
 __pycache__
+.eml
