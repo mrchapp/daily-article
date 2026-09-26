@@ -376,6 +376,8 @@ def make_wikiquote_section(month, day, year):
     page_title = 'Wikiquote:Quote of the day/%s %s, %s' % (month, day, year)
     parsed_wikitext = parse_wikitext(enquote, '{{'+page_title+'}}')
     lines = []
+    author = None
+    read_more = None
     for line in parsed_wikitext.split('\n'):
         if line.find('\u2014') != -1:
             author_soup = BeautifulSoup(line, 'html.parser')
@@ -387,6 +389,14 @@ def make_wikiquote_section(month, day, year):
                 author = '  --'+a.string
         elif line != 'in<br />':
             lines.append(unescape(line))
+    if author is None or read_more is None:
+        page_url = enquote_base + '/wiki/' + page_title.replace(' ', '_')
+        message = 'no quote/author line found on %s' % page_url
+        if args.force:
+            print(message, file=sys.stderr)
+            return
+        else:
+            raise ValueError(message)
     authorless_lines = '\n'.join(lines)
     quote = strip_html(authorless_lines)
     quote = quote.strip()
