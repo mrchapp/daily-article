@@ -185,6 +185,7 @@ def make_featured_article_section(month, day, year):
                                    month,
                                    day,
                                    year)
+    page_url = enwiki_base + '/wiki/' + page_title.replace(' ', '_')
     try:
         wikitext = enwiki.get_wikitext(page_title)
     except NoPage:
@@ -194,11 +195,19 @@ def make_featured_article_section(month, day, year):
     if parsed_wikitext.startswith(wrapper_div):
         parsed_wikitext = parsed_wikitext.replace(wrapper_div, '')
     # Grab the first <p> tag and pray
-    found = False
+    first_para = None
     for line in parsed_wikitext.split('\n'):
-        if line.startswith('<p>') and not found:
+        if line.startswith('<p>') and first_para is None:
             first_para = line
-            found = True
+    if first_para is None:
+        # No paragraph means no article, so the section would be empty and the
+        # caller's subject line would have no title either.
+        message = 'no article paragraph found on %s' % page_url
+        if args.force:
+            print(message, file=sys.stderr)
+            return ''
+        else:
+            raise ValueError(message)
     # The paragraph trails off into a "(Full article...)" parenthetical and the
     # prose is everything before it. Find that element by identity instead of
     # probing the raw HTML for '. (' and friends: the parser wraps the
@@ -206,6 +215,8 @@ def make_featured_article_section(month, day, year):
     # literal probes never match and the fragment leaked into the emailed text.
     para_soup = BeautifulSoup(first_para, 'html.parser')
     read_more_link = None
+    read_more_href = None
+    featured_article_title = None
     for a in para_soup.find_all('a'):
         if a.get_text().replace('\xa0', ' ').strip().startswith('Full article'):
             read_more_link = a
@@ -235,17 +246,32 @@ def make_featured_article_section(month, day, year):
         for a in more_soup.find_all('a'):
             read_more_href = a['href']
             featured_article_title = a['title']
+    if read_more_href is None:
+        # Without it there is no title for the subject line and no link to send
+        # readers to. The prose is still the section, so under --force it goes
+        # out without the "Read more" line rather than not at all.
+        message = 'no "Full article" link found on %s' % page_url
+        if args.force:
+            print(message, file=sys.stderr)
+        else:
+            raise ValueError(message)
     p_text = unescape(p_text)
     clean_p_text = strip_html(p_text)
-    read_more = ('%s' + '<%s%s>') % ('Read more: ',
-                                     enwiki_base,
-                                     read_more_href.replace('(', '%28').replace(')', '%29'))
-    featured_article_section = '\n'.join([wrap_text(clean_p_text),
-                                          '',
-                                          read_more,
-                                          ''])
+    if read_more_href is None:
+        featured_article_section = '\n'.join([wrap_text(clean_p_text),
+                                              ''])
+    else:
+        read_more = ('%s' + '<%s%s>') % ('Read more: ',
+                                         enwiki_base,
+                                         read_more_href.replace('(', '%28').replace(')', '%29'))
+        featured_article_section = '\n'.join([wrap_text(clean_p_text),
+                                              '',
+                                              read_more,
+                                              ''])
     final_sections.append(featured_article_section)
-    return featured_article_title
+    # This is the caller's subject line. An empty title, not None: --force sent
+    # the section without a link, so there is no article to name.
+    return featured_article_title if featured_article_title is not None else ''
 
 def drop_pictured_marker(line):
     """Drop the "(pictured)" marker, and the space that held it apart.
