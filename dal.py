@@ -462,20 +462,68 @@ def send_email(email_to, email_from, email_subject, email_body):
         server.sendmail(email_from, addr, msg.as_bytes(), '8bitmime')
     server.quit()
 
+def notify_wiki(tb, summary):
+    """Post a traceback to the notification page - the channel that alerts us."""
+    text = '\n'.join(("Just thought you'd like to know:",
+                      "<pre>",
+                      tb.replace(config.wiki_password, 'XXX'),
+                      "</pre>",
+                      "Love, --~~~~"))
+    metawiki.login(config.wiki_username, config.wiki_password)
+    metawiki.edit(config.notification_page,
+                  text=text,
+                  summary=summary,
+                  section='new',
+                  bot=1)
+
+def report_skipped_section(label, exc):
+    """Say which section was skipped: on stderr, and on the wiki when delivering."""
+    message = '%s section skipped: %s: %s' % (label, type(exc).__name__, exc)
+    print(message.replace(config.wiki_password, 'XXX'), file=sys.stderr)
+    if DEBUG_MODE:
+        return
+    try:
+        notify_wiki(traceback.format_exc().rstrip(),
+                    'daily-article-l section skipped: %s' % label)
+    except Exception as notify_exc:
+        # Failing to report must not cost the digest as well: stderr already has it.
+        print('could not report the skipped section to the wiki: %s: %s' % (
+            type(notify_exc).__name__, notify_exc), file=sys.stderr)
+
+def section_builder(builder, label, *args):
+    """Run one section builder, skipping just that section if it fails.
+
+    One upstream selector change used to cost the whole day's email. Now the
+    failing section is reported and the sections that did build still go out.
+    """
+    try:
+        return builder(*args)
+    except Exception as exc:
+        report_skipped_section(label, exc)
+        return None
+
 send = False
 try:
     # Do some shit
-    featured_article_title = make_featured_article_section(month, day, year)
+    featured_article_title = section_builder(make_featured_article_section,
+                                             'featured article', month, day, year)
     if featured_article_title:
         subject = '%s %d: %s' % (month, day, featured_article_title)
     else:
         # The builder returns False for a missing page, and --force can leave an
         # empty title: no article to name, so the subject drops the suffix.
         subject = '%s %d' % (month, day)
-    make_selected_anniversaries_section(month, day)
-    make_wiktionary_section(month, day, year)
-    make_wikiquote_section(month, day, year)
+    section_builder(make_selected_anniversaries_section,
+                    "today's selected anniversaries", month, day)
+    section_builder(make_wiktionary_section,
+                    "wiktionary's word of the day", month, day, year)
+    section_builder(make_wikiquote_section,
+                    'wikiquote quote of the day', month, day, year)
 
+    if not final_sections:
+        # Every section failed, so there is nothing to send: take the failure
+        # path, which reports it, rather than mailing an empty digest.
+        raise ValueError('no sections could be built for %s %s, %s' % (month, day, year))
     final_output = '\n'.join(final_sections)
     send = True
 
@@ -487,17 +535,7 @@ except:  # Unnamed!
         print(tb)
         sys.exit(1)
     else:
-        text = '\n'.join(("Just thought you'd like to know:",
-                          "<pre>",
-                          tb,
-                          "</pre>",
-                          "Love, --~~~~"))
-        metawiki.login(config.wiki_username, config.wiki_password)
-        metawiki.edit(config.notification_page,
-                      text=text,
-                      summary='daily-article-l delivery failed (%s)' % date,
-                      section='new',
-                      bot=1)
+        notify_wiki(tb, 'daily-article-l delivery failed (%s)' % date)
 
 if args.output:
     # The artifact is addressed to the sender: it is not being mailed anywhere.
