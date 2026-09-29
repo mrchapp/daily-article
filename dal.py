@@ -466,7 +466,12 @@ send = False
 try:
     # Do some shit
     featured_article_title = make_featured_article_section(month, day, year)
-    subject = '%s %d: %s' % (month, day, featured_article_title)
+    if featured_article_title:
+        subject = '%s %d: %s' % (month, day, featured_article_title)
+    else:
+        # The builder returns False for a missing page, and --force can leave an
+        # empty title: no article to name, so the subject drops the suffix.
+        subject = '%s %d' % (month, day)
     make_selected_anniversaries_section(month, day)
     make_wiktionary_section(month, day, year)
     make_wikiquote_section(month, day, year)
