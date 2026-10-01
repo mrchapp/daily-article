@@ -233,7 +233,7 @@ def make_featured_article_section(month, day, year):
         # Unrecognised markup: keep the old behaviour rather than guessing.
         p_text = first_para.rsplit('. (', 1)[0]+'.'
         if (first_para.find('. (') != -1 and
-            first_para[:100].find('._(') != -1):
+            first_para[:100].find('. (') != -1):
             more_html = first_para.rsplit('. (', 2)
             more_html = '. ('.join([more_html[1], more_html[2]])
         elif first_para.find('. (') != -1:
