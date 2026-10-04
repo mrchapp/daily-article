@@ -235,7 +235,10 @@ def make_featured_article_section(month, day, year):
         if (first_para.find('. (') != -1 and
             first_para[:100].find('._(') != -1):
             more_html = first_para.rsplit('. (', 2)
-            more_html = '. ('.join([more_html[1], more_html[2]])
+            if len(more_html) >= 3:
+                more_html = '. ('.join([more_html[1], more_html[2]])
+            else:
+                more_html = first_para
         elif first_para.find('. (') != -1:
             more_html = first_para.rsplit('. (', 1)[1]
         elif first_para.find('." (') != -1:
