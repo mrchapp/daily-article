@@ -154,7 +154,7 @@ def strip_html(original_text):
 def parse_wikitext(wiki, wikitext):
     params = {'action' : 'parse',
               'text'   : wikitext,
-              'disablepp' : 'true'}
+              }
     response = wiki.api_request(params)
     parsed_wikitext = response['parse']['text']['*']
     return parsed_wikitext
