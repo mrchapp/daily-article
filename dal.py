@@ -21,6 +21,18 @@ from bs4 import BeautifulSoup
 
 import config
 
+def redact_secrets(text):
+    """Replace every configured secret in text with a marker.
+
+    Only the two passwords the script handles are secrets. An empty or unset
+    password is skipped: str.replace('', marker) would otherwise insert the
+    marker between every character of the traceback.
+    """
+    for secret in (config.wiki_password, config.email_password):
+        if secret:
+            text = text.replace(secret, 'XXX')
+    return text
+
 def parse_date(text):
     """Turn a YYYY-MM-DD command-line value into a date."""
     try:
@@ -469,7 +481,7 @@ def notify_wiki(tb, summary):
     """Post a traceback to the notification page - the channel that alerts us."""
     text = '\n'.join(("Just thought you'd like to know:",
                       "<pre>",
-                      tb.replace(config.wiki_password, 'XXX'),
+                      redact_secrets(tb),
                       "</pre>",
                       "Love, --~~~~"))
     metawiki.login(config.wiki_username, config.wiki_password)
@@ -482,7 +494,7 @@ def notify_wiki(tb, summary):
 def report_skipped_section(label, exc):
     """Say which section was skipped: on stderr, and on the wiki when delivering."""
     message = '%s section skipped: %s: %s' % (label, type(exc).__name__, exc)
-    print(message.replace(config.wiki_password, 'XXX'), file=sys.stderr)
+    print(redact_secrets(message), file=sys.stderr)
     if DEBUG_MODE:
         return
     try:
@@ -533,7 +545,7 @@ try:
 except:  # Unnamed!
     # Inform the wiki of an issue!
     date = '%s %s, %s' % (month, day, year)
-    tb = traceback.format_exc().rstrip().replace(config.wiki_password, 'XXX')
+    tb = redact_secrets(traceback.format_exc().rstrip())
     if DEBUG_MODE:
         print(tb)
         sys.exit(1)
