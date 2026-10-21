@@ -462,7 +462,7 @@ def send_email(email_to, email_from, email_subject, email_body):
     server.login(email_from, config.email_password)
     for addr in email_to:
         msg = build_email(addr, email_from, email_subject, email_body)
-        server.sendmail(email_from, addr, msg.as_bytes(), '8bitmime')
+        server.sendmail(email_from, addr, msg.as_bytes(), mail_options=['BODY=8BITMIME'])
     server.quit()
 
 def notify_wiki(tb, summary):
